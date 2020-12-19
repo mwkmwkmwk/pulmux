@@ -15,6 +15,7 @@ class DevConn:
         self.loop = asyncio.get_running_loop()
         self.dead = False
         asyncio.create_task(self.handle_reader())
+        asyncio.create_task(self.keepalive())
 
     async def error(self, exc):
         if self.dead:
@@ -29,12 +30,20 @@ class DevConn:
         if self.user is not None:
             await self.user.error(exc)
 
+    async def keepalive(self):
+        while True:
+            if self.dead:
+                break
+            self.writer.write(b'\x41')
+            await self.writer.drain()
+            await asyncio.sleep(5)
+
     async def handle_reader(self):
         try:
             while True:
                 c = await self.reader.readexactly(1)
                 c = c[0]
-                print(f'RX {c:02x}')
+                #print(f'RX {c:02x}')
                 if c == 0x80:
                     cnt = await self.reader.readexactly(2)
                     cnt = int.from_bytes(cnt, 'little')
@@ -276,7 +285,7 @@ class UserConn:
                     while cnt:
                         cur = min(cnt, 0x1000)
                         data = await self.reader.readexactly(cur)
-                        print(f'USEND {data}')
+                        #print(f'USEND {data}')
                         await device.uart_send(data)
                         cnt -= cur
                 else:
