@@ -14,6 +14,7 @@ class DevConn:
         self.completions = collections.deque()
         self.loop = asyncio.get_running_loop()
         self.dead = False
+        self.wlock = asyncio.Lock()
         asyncio.create_task(self.handle_reader())
         asyncio.create_task(self.keepalive())
 
@@ -34,8 +35,9 @@ class DevConn:
         while True:
             if self.dead:
                 break
-            self.writer.write(b'\x41')
-            await self.writer.drain()
+            async with self.wlock:
+                self.writer.write(b'\x41')
+                await self.writer.drain()
             await asyncio.sleep(5)
 
     async def handle_reader(self):
@@ -109,8 +111,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x80, cnt, f))
-        self.writer.write(b'\x00' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x00' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
+            await self.writer.drain()
         return f
 
     async def rd16(self, addr, cnt):
@@ -120,8 +123,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x81, cnt, f))
-        self.writer.write(b'\x01' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x01' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
+            await self.writer.drain()
         return f
 
     async def rd32(self, addr, cnt):
@@ -131,8 +135,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x82, cnt, f))
-        self.writer.write(b'\x02' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x02' + addr.to_bytes(4, 'little') + cnt.to_bytes(2, 'little'))
+            await self.writer.drain()
         return f
 
     async def wr8(self, addr, data):
@@ -144,8 +149,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x90, None, f))
-        self.writer.write(b'\x10' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + bytes(data))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x10' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + bytes(data))
+            await self.writer.drain()
         return f
 
     async def wr16(self, addr, data):
@@ -157,8 +163,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x91, None, f))
-        self.writer.write(b'\x11' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(2, 'little') for x in data))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x11' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(2, 'little') for x in data))
+            await self.writer.drain()
         return f
 
     async def wr32(self, addr, data):
@@ -170,8 +177,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x92, None, f))
-        self.writer.write(b'\x12' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(4, 'little') for x in data))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x12' + addr.to_bytes(4, 'little') + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(4, 'little') for x in data))
+            await self.writer.drain()
         return f
 
     async def wrdevc(self, data):
@@ -181,22 +189,25 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0x93, None, f))
-        self.writer.write(b'\x13' + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(4, 'little') for x in data))
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x13' + len(data).to_bytes(2, 'little') + b''.join(x.to_bytes(4, 'little') for x in data))
+            await self.writer.drain()
         return f
 
     async def fpga_reset(self):
         f = self.loop.create_future()
         self.completions.append((0xa0, None, f))
-        self.writer.write(b'\x20')
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x20')
+            await self.writer.drain()
         return f
 
     async def fpga_boot(self):
         f = self.loop.create_future()
         self.completions.append((0xa1, None, f))
-        self.writer.write(b'\x21')
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x21')
+            await self.writer.drain()
         return f
 
     async def uart_send(self, data):
@@ -205,8 +216,9 @@ class DevConn:
             raise ValueError
         f = self.loop.create_future()
         self.completions.append((0xb0, None, f))
-        self.writer.write(b'\x30' + len(data).to_bytes(2, 'little') + data)
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\x30' + len(data).to_bytes(2, 'little') + data)
+            await self.writer.drain()
         return f
 
 
@@ -224,6 +236,7 @@ class UserConn:
         self.dead = False
         self.booted = False
         self.post_boot = b''
+        self.wlock = asyncio.Lock()
         asyncio.create_task(self.handle_reader())
 
     async def error(self, exc):
@@ -238,8 +251,7 @@ class UserConn:
             dev = self.device
             dev.user = None
             self.device = None
-            await dev.fpga_reset()
-            await self.mux.add_free_device(dev)
+            await dev.error(exc)
 
     async def handle_reader(self):
         try:
@@ -272,10 +284,11 @@ class UserConn:
                     break
             else:
                 raise Exception('FPGA failed to boot')
-            self.writer.write(b'\xa1' + self.post_boot)
-            self.booted = True
-            self.post_boot = b''
-            await self.writer.drain()
+            async with self.wlock:
+                self.writer.write(b'\xa1' + self.post_boot)
+                self.booted = True
+                self.post_boot = b''
+                await self.writer.drain()
             while True:
                 c = await self.reader.readexactly(1)
                 c = c[0]
@@ -301,8 +314,9 @@ class UserConn:
         self.device = dev
         dev.user = self
         name = dev.peerip.encode()
-        self.writer.write(b'\xa0' + len(name).to_bytes(2, 'little') + name)
-        await self.writer.drain()
+        async with self.wlock:
+            self.writer.write(b'\xa0' + len(name).to_bytes(2, 'little') + name)
+            await self.writer.drain()
         self.dev_future.set_result(dev)
 
     async def got_uart_data(self, data):
@@ -321,8 +335,9 @@ class UserConn:
         if not self.booted:
             self.post_boot += pkt
         else:
-            self.writer.write(pkt)
-            await self.writer.drain()
+            async with self.wlock:
+                self.writer.write(pkt)
+                await self.writer.drain()
 
 
 class DevMux:
