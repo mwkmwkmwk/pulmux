@@ -3,6 +3,19 @@ import socket
 import collections
 
 
+def validate_range(addr, cnt, gran=1):
+    if addr % gran:
+        raise ValueError(f'unaligned address {addr:08x}')
+    end = addr + cnt
+    if addr >= 0x20000 and end <= 0x40000:
+        return
+    if addr >= 0x40000000 and end <= 0x80000000:
+        return
+    if addr >= 0x80000000 and end <= 0xc0000000:
+        return
+    raise ValueError(f'address {addr:08x}:{end:08x} not allowed')
+
+
 class DevConn:
     def __init__(self, mux, reader, writer):
         self.peerip, self.peerport = writer.get_extra_info('peername')
@@ -32,13 +45,16 @@ class DevConn:
             await self.user.error(exc)
 
     async def keepalive(self):
-        while True:
-            if self.dead:
-                break
-            async with self.wlock:
-                self.writer.write(b'\x41')
-                await self.writer.drain()
-            await asyncio.sleep(5)
+        try:
+            while True:
+                if self.dead:
+                    break
+                async with self.wlock:
+                    self.writer.write(b'\x41')
+                    await self.writer.drain()
+                await asyncio.sleep(5)
+        except Exception as e:
+            await self.error(e)
 
     async def handle_reader(self):
         try:
@@ -54,7 +70,7 @@ class DevConn:
                     if t != 0x80 or l != cnt:
                         raise ValueError(t)
                     f.set_result(data)
-                elif c == 0x80:
+                elif c == 0x81:
                     cnt = await self.reader.readexactly(2)
                     cnt = int.from_bytes(cnt, 'little')
                     data = await self.reader.readexactly(cnt * 2)
@@ -292,7 +308,129 @@ class UserConn:
             while True:
                 c = await self.reader.readexactly(1)
                 c = c[0]
-                if c == 0x30:
+                if c == 0x00:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        f = await device.rd8(addr, cur)
+                        fs.append(f)
+                        addr += cur
+                        cnt -= cur
+                    res = []
+                    for f in fs:
+                        res += await f
+                    async with self.wlock:
+                        self.writer.write(b'\x80' + len(res).to_bytes(4, 'little') + bytes(res))
+                        await self.writer.drain()
+                elif c == 0x01:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt * 2, 2)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        f = await device.rd16(addr, cur)
+                        fs.append(f)
+                        addr += cur * 2
+                        cnt -= cur
+                    res = []
+                    for f in fs:
+                        res += await f
+                    async with self.wlock:
+                        self.writer.write(b'\x81' + len(res).to_bytes(4, 'little') + b''.join(x.to_bytes(2, 'little') for x in res))
+                        await self.writer.drain()
+                elif c == 0x02:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt * 4, 4)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        f = await device.rd32(addr, cur)
+                        fs.append(f)
+                        addr += cur * 4
+                        cnt -= cur
+                    res = []
+                    for f in fs:
+                        res += await f
+                    async with self.wlock:
+                        self.writer.write(b'\x82' + len(res).to_bytes(4, 'little') + b''.join(x.to_bytes(4, 'little') for x in res))
+                        await self.writer.drain()
+                elif c == 0x10:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        data = await self.reader.readexactly(cur)
+                        f = await device.wr8(addr, data)
+                        fs.append(f)
+                        addr += cur
+                        cnt -= cur
+                    for f in fs:
+                        await f
+                    async with self.wlock:
+                        self.writer.write(b'\x90')
+                        await self.writer.drain()
+                elif c == 0x11:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt * 2, 2)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        data = await self.reader.readexactly(cur * 2)
+                        data = [
+                            int.from_bytes(data[x:x+2], 'little')
+                            for x in range(0, cur * 2, 2)
+                        ]
+                        f = await device.wr16(addr, data)
+                        fs.append(f)
+                        addr += cur * 2
+                        cnt -= cur
+                    for f in fs:
+                        await f
+                    async with self.wlock:
+                        self.writer.write(b'\x91')
+                        await self.writer.drain()
+                elif c == 0x12:
+                    addr = await self.reader.readexactly(4)
+                    addr = int.from_bytes(addr, 'little')
+                    cnt = await self.reader.readexactly(4)
+                    cnt = int.from_bytes(cnt, 'little')
+                    validate_range(addr, cnt * 4, 4)
+                    fs = []
+                    while cnt:
+                        cur = min(cnt, 0x1000)
+                        data = await self.reader.readexactly(cur * 4)
+                        data = [
+                            int.from_bytes(data[x:x+4], 'little')
+                            for x in range(0, cur * 4, 4)
+                        ]
+                        f = await device.wr32(addr, data)
+                        fs.append(f)
+                        addr += cur * 4
+                        cnt -= cur
+                    for f in fs:
+                        await f
+                    async with self.wlock:
+                        self.writer.write(b'\x92')
+                        await self.writer.drain()
+                elif c == 0x30:
                     cnt = await self.reader.readexactly(4)
                     cnt = int.from_bytes(cnt, 'little')
                     while cnt:
